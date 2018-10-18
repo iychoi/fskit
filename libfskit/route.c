@@ -26,10 +26,10 @@
 #include "fskit_private/private.h"
 
 struct fskit_route_table_row {
-   
+
    int route_type;
    fskit_route_list_t routes;
-   
+
    // for rb tree
    struct fskit_route_table_row* left;
    struct fskit_route_table_row* right;
@@ -42,242 +42,242 @@ SGLIB_DEFINE_VECTOR_FUNCTIONS( fskit_path_route_entry );
 SGLIB_DEFINE_RBTREE_FUNCTIONS( fskit_route_table, left, right, color, FSKIT_ROUTE_TABLE_ROW_CMP );
 
 
-// new empty route table 
+// new empty route table
 fskit_route_table* fskit_route_table_new(void) {
-   
+
    fskit_route_table* ret = CALLOC_LIST( fskit_route_table, 1 );
    if( ret == NULL ) {
       return NULL;
    }
-   
+
    ret->route_type = -1;
-   
+
    return ret;
 }
 
 
-// new route table row 
+// new route table row
 struct fskit_route_table_row* fskit_route_table_row_new( int route_type ) {
-   
+
    struct fskit_route_table_row* row = CALLOC_LIST( struct fskit_route_table_row, 1 );
    if( row == NULL ) {
       return NULL;
    }
-   
+
    row->route_type = route_type;
    sglib_fskit_path_route_entry_vector_init( &row->routes );
-   
+
    return row;
 }
 
-// row length 
+// row length
 static unsigned long fskit_route_table_row_len( struct fskit_route_table_row* row ) {
-   
+
    return sglib_fskit_path_route_entry_vector_size( &row->routes );
 }
 
 
-// row entry 
+// row entry
 static struct fskit_path_route* fskit_route_table_row_at_ref( struct fskit_route_table_row* row, unsigned long i ) {
-   
+
    return sglib_fskit_path_route_entry_vector_at( &row->routes, i );
 }
 
-// emplace entry 
+// emplace entry
 static int fskit_route_table_row_emplace( struct fskit_route_table_row* row, struct fskit_path_route* route, unsigned long i ) {
-   
+
    return sglib_fskit_path_route_entry_vector_set( &row->routes, route, i );
 }
 
-// append entry 
+// append entry
 static int fskit_route_table_row_append( struct fskit_route_table_row* row, struct fskit_path_route* route ) {
-   
+
    return sglib_fskit_path_route_entry_vector_push_back( &row->routes, route );
 }
 
 // start iterating over a route table
 struct fskit_route_table_row* fskit_route_table_begin( fskit_route_table_itr* itr, fskit_route_table* route_table ) {
-   
+
    return sglib_fskit_route_table_it_init_inorder( itr, route_table );
 }
 
-// get the next entry in a directory entry set 
+// get the next entry in a directory entry set
 struct fskit_route_table_row* fskit_route_table_next( fskit_route_table_itr* itr ) {
-   
+
    return sglib_fskit_route_table_it_next( itr );
 }
 
 // free up a row, and all the routes it contains.
 int fskit_route_table_row_free( struct fskit_route_table_row* row ) {
-   
+
    if( row != NULL ) {
-   
+
       for( unsigned long i = 0; i < fskit_route_table_row_len( row ); i++ ) {
-         
+
          struct fskit_path_route* route = fskit_route_table_row_at_ref( row, i );
          if( route == NULL ) {
              continue;
          }
-         
+
          fskit_path_route_free( route );
          fskit_safe_free( route );
       }
-      
+
       sglib_fskit_path_route_entry_vector_free( &row->routes );
    }
-   
+
    return 0;
 }
 
 // free up a whole table--all its rows and its routes
 int fskit_route_table_free( fskit_route_table* route_table ) {
-   
+
    fskit_route_table_itr itr;
    struct fskit_route_table_row* row = NULL;
    struct fskit_route_table_row* old_row = NULL;
-   
+
    for( row = fskit_route_table_begin( &itr, route_table ); row != NULL; row = fskit_route_table_next( &itr ) ) {
-      
+
       fskit_route_table_row_free( row );
    }
-   
+
    for( row = fskit_route_table_begin( &itr, route_table ); row != NULL; ) {
-      
+
       old_row = row;
       row = fskit_route_table_next( &itr );
-      
+
       fskit_safe_free( old_row );
    }
-   
+
    return 0;
 }
 
 
 // insert a route into the route table.  Puts the pointer only; does not duplicate the route (i.e. the table owns the route now).
 // return a route ID on success (>= 0)
-// return -ENOMEM on OOM 
+// return -ENOMEM on OOM
 int fskit_route_table_insert( fskit_route_table** route_table, int route_type, struct fskit_path_route* route ) {
-   
+
    int rc = 0;
    int route_id = -1;
    struct fskit_route_table_row lookup;
-   struct fskit_route_table_row* row = NULL;       // routes for this route type 
-   
+   struct fskit_route_table_row* row = NULL;       // routes for this route type
+
    memset( &lookup, 0, sizeof(struct fskit_route_table_row) );
-   
+
    lookup.route_type = route_type;
    row = sglib_fskit_route_table_find_member( *route_table, &lookup );
-   
+
    if( row == NULL ) {
-      
-      // no route row for this type exists.  make one 
+
+      // no route row for this type exists.  make one
       row = fskit_route_table_row_new( route_type );
       if( row == NULL ) {
-         
+
          return -ENOMEM;
       }
-      
+
       fskit_debug("Add new route table row %p for type %d\n", row, route_type );
       sglib_fskit_route_table_add( route_table, row );
    }
-   
+
    // find an empty slot
    for( unsigned long i = 0; i < fskit_route_table_row_len( row ); i++ ) {
-      
+
       if( fskit_route_table_row_at_ref( row, i ) == NULL ) {
-         
-         // emplace 
+
+         // emplace
          fskit_route_table_row_emplace( row, route, i );
          route_id = (int)i;
          break;
       }
    }
-   
+
    if( route_id < 0 ) {
-      
+
       rc = fskit_route_table_row_append( row, route );
       if( rc < 0 ) {
-         
+
          return -ENOMEM;
       }
-      
-      route_id = fskit_route_table_row_len( row ) - 1;      
+
+      route_id = fskit_route_table_row_len( row ) - 1;
    }
-   
+
    fskit_debug("Add new route table row entry %p for type %d at %d\n", route, route_type, route_id );
    return route_id;
 }
 
 
 // get a row in the route table
-// return NULL if not found 
+// return NULL if not found
 struct fskit_route_table_row* fskit_route_table_get_row( fskit_route_table* route_table, int route_type ) {
-   
+
    struct fskit_route_table_row lookup;
    struct fskit_route_table_row* routes = NULL;
-   
+
    memset( &lookup, 0, sizeof(struct fskit_route_table_row) );
-   
+
    lookup.route_type = route_type;
    return sglib_fskit_route_table_find_member( route_table, &lookup );
 }
 
 
-// find a route in the route table 
+// find a route in the route table
 // return NULL if not found
 struct fskit_path_route* fskit_route_table_find( fskit_route_table* route_table, int route_type, int route_id ) {
-   
+
    struct fskit_route_table_row* row = NULL;
    struct fskit_path_route* route = NULL;
-   
+
    row = fskit_route_table_get_row( route_table, route_type );
    if( row == NULL ) {
       return NULL;
    }
-   
+
    if( route_id >= (signed)fskit_route_table_row_len( row ) ) {
       return NULL;
    }
-   
+
    return fskit_route_table_row_at_ref( row, route_id );
 }
 
-// remove a route from a route table 
+// remove a route from a route table
 // return the removed route on success; NULL if there is no such route
 struct fskit_path_route* fskit_route_table_remove( fskit_route_table** route_table, int route_type, int route_id ) {
-   
+
    struct fskit_route_table_row* row = NULL;
    struct fskit_path_route* route = NULL;
    bool free_row = true;
-   
+
    row = fskit_route_table_get_row( *route_table, route_type );
    if( row == NULL ) {
       return NULL;
    }
-   
+
    if( route_id >= (signed)fskit_route_table_row_len( row ) ) {
       return NULL;
    }
-   
+
    route = fskit_route_table_row_at_ref( row, route_id );
    fskit_route_table_row_emplace( row, NULL, route_id );
-   
+
    // can we free this row?
    for( unsigned long i = 0; i < fskit_route_table_row_len( row ); i++ ) {
-      
+
       if( fskit_route_table_row_at_ref( row, i ) != NULL ) {
          free_row = false;
          break;
       }
    }
-   
+
    if( free_row ) {
-      
+
       sglib_fskit_route_table_delete( route_table, row );
       fskit_route_table_row_free( row );
       fskit_safe_free( row );
    }
-   
+
    return route;
 }
 
@@ -322,9 +322,9 @@ static int fskit_route_metadata_free( struct fskit_route_metadata* route_metadat
       fskit_safe_free( route_metadata->path );
       route_metadata->path = NULL;
    }
-   
+
    if( route_metadata->name != NULL ) {
-      
+
       fskit_safe_free( route_metadata->name );
       route_metadata->name = NULL;
    }
@@ -441,18 +441,25 @@ static bool fskit_path_route_is_defined( struct fskit_path_route* route ) {
    return route->path_regex_str != NULL;
 }
 
+static bool fskit_path_route_is_any( struct fskit_path_route* route ) {
+    if(route->path_regex_str != NULL) {
+        return strcmp(route->path_regex_str, FSKIT_ROUTE_ANY) == 0;
+    }
+    return false;
+}
+
 // start running a route's callback.
 // enforce the consistency discipline by locking the route appropriately
 static int fskit_route_enter( struct fskit_path_route* route, struct fskit_entry* fent, struct fskit_route_dispatch_args* dargs ) {
 
    int rc = 0;
-   
+
    if( fent == NULL && !dargs->fent_absent ) {
        fskit_error("%s", "BUG: entry is NULL\n");
        exit(1);
    }
-  
-   // the fent must be ref'ed before the route is called 
+
+   // the fent must be ref'ed before the route is called
    if( fent != NULL && route->route_type != FSKIT_ROUTE_MATCH_DETACH && route->route_type != FSKIT_ROUTE_MATCH_DESTROY && fent->open_count <= 0 && fent->link_count <= 0 ) {
       fskit_error("\n\nBUG: entry %p is not ref'ed (open = %d, link = %d)\n\n", fent, fent->open_count, fent->link_count);
       exit(1);
@@ -479,14 +486,14 @@ static int fskit_route_enter( struct fskit_path_route* route, struct fskit_entry
       fskit_error("BUG: locking route %s with discipline %d rc = %d\n", route->path_regex_str, route->consistency_discipline, rc );
       return rc;
    }
-   
+
    return 0;
 }
 
 // finish running a route's callback.
 // clean up from enforcing the consistency discipline
 static int fskit_route_leave( struct fskit_path_route* route, struct fskit_entry* fent ) {
-   
+
    if( route->route_type != FSKIT_ROUTE_MATCH_SETMETADATA ) {
        if( fent != NULL && (route->consistency_discipline == FSKIT_INODE_SEQUENTIAL || route->consistency_discipline == FSKIT_INODE_CONCURRENT) ) {
           fskit_entry_unlock( fent );
@@ -495,7 +502,7 @@ static int fskit_route_leave( struct fskit_path_route* route, struct fskit_entry
           pthread_rwlock_unlock( &route->lock );
        }
    }
-   
+
    return 0;
 }
 
@@ -579,10 +586,10 @@ static int fskit_route_dispatch( struct fskit_core* core, struct fskit_route_met
          break;
 
       case FSKIT_ROUTE_MATCH_DESTROY:
-         
+
          rc = fskit_safe_dispatch( route->method.destroy_cb, core, route_metadata, fent, dargs->inode_data );
          break;
-         
+
       case FSKIT_ROUTE_MATCH_STAT:
 
          rc = fskit_safe_dispatch( route->method.stat_cb, core, route_metadata, fent, dargs->sb );
@@ -594,22 +601,22 @@ static int fskit_route_dispatch( struct fskit_core* core, struct fskit_route_met
          break;
 
       case FSKIT_ROUTE_MATCH_RENAME:
-         
+
          rc = fskit_safe_dispatch( route->method.rename_cb, core, route_metadata, fent, dargs->new_path, dargs->dest );
          break;
-         
+
       case FSKIT_ROUTE_MATCH_LINK:
-         
+
          rc = fskit_safe_dispatch( route->method.link_cb, core, route_metadata, fent, dargs->new_path );
          break;
-         
+
       case FSKIT_ROUTE_MATCH_GETXATTR:
 
          rc = fskit_safe_dispatch( route->method.getxattr_cb, core, route_metadata, fent, dargs->xattr_name, dargs->xattr_buf, dargs->xattr_buf_len );
          break;
 
       case FSKIT_ROUTE_MATCH_SETXATTR:
-         
+
          rc = fskit_safe_dispatch( route->method.setxattr_cb, core, route_metadata, fent, dargs->xattr_name, dargs->xattr_value, dargs->xattr_value_len, dargs->xattr_flags );
          break;
 
@@ -635,7 +642,7 @@ static int fskit_route_dispatch( struct fskit_core* core, struct fskit_route_met
    }
 
    fskit_route_leave( route, fent );
-   
+
    if( rc < 0 ) {
        fskit_error("fskit_safe_dispatch(%d) rc = %d\n", route->route_type, rc );
    }
@@ -645,39 +652,72 @@ static int fskit_route_dispatch( struct fskit_core* core, struct fskit_route_met
 
 // try to match a path and type to a route.
 // we consider it "found" if we can match on a regex in the route table.
-// return a pointer to the first matching route 
+// return a pointer to the first matching route
 // return -ENOENT if no match
 // NOTE: not thread-safe
 static struct fskit_path_route* fskit_route_match( fskit_route_table* route_table, int route_type, char const* path, struct fskit_route_metadata* route_metadata ) {
 
    int rc = 0;
    struct fskit_path_route* route = NULL;
-   
+
    struct fskit_route_table_row* row = fskit_route_table_get_row( route_table, route_type );
-   
+
    if( row == NULL ) {
       return NULL;
    }
-   
-   for( unsigned long i = 0; i < fskit_route_table_row_len( row ); i++ ) {
-      
-      route = fskit_route_table_row_at_ref( row, i );
-      
-      if( !fskit_path_route_is_defined( route ) ) {
-         continue;
-      }
-      
-      // match?
-      rc = fskit_match_regex( route_metadata, route, path );
-      if( rc == 0 ) {
-         
-         // matched!
-         return route;
-      }
+
+   if(fskit_route_table_row_len( row ) == 1) {
+       // most case, it has FSKIT_ROUTE_ANY
+       route = fskit_route_table_row_at_ref( row, 0 );
+       if( fskit_path_route_is_any( route ) ) {
+           size_t path_len = strlen(path);
+
+           char** argv = CALLOC_LIST( char*, route->num_expected_matches + 1 );
+           if( argv == NULL ) {
+              return NULL;
+           }
+
+           char* path_dup = strdup( path );
+           if( path_dup == NULL ) {
+              FREE_LIST( argv );
+              return NULL;
+           }
+
+           // accumulate matches
+           char* next_match = CALLOC_LIST( char, path_len + 1 );
+           if( next_match == NULL ) {
+             FREE_LIST( argv );
+             fskit_safe_free( argv );
+             return NULL;
+           }
+
+           strncpy( next_match, path, path_len );
+           argv[0] = next_match;
+
+           fskit_route_metadata_init( route_metadata, path_dup, 1, argv );
+           return route;
+       }
+   } else {
+       for( unsigned long i = 0; i < fskit_route_table_row_len( row ); i++ ) {
+
+          route = fskit_route_table_row_at_ref( row, i );
+
+          if( !fskit_path_route_is_defined( route ) ) {
+             continue;
+          }
+
+          // match?
+          rc = fskit_match_regex( route_metadata, route, path );
+          if( rc == 0 ) {
+
+             // matched!
+             return route;
+          }
+       }
    }
-   
+
    // no match
-   fskit_debug("No match on route type %d on '%s'\n", route_type, path ); 
+   fskit_debug("No match on route type %d on '%s'\n", route_type, path );
    return NULL;
 }
 
@@ -685,14 +725,14 @@ static struct fskit_path_route* fskit_route_match( fskit_route_table* route_tabl
 // copy relevant route dispatch arguments to route metadata
 // return 0 on success
 static int fskit_route_metadata_populate( struct fskit_route_metadata* route_metadata, struct fskit_route_dispatch_args* dargs ) {
-   
+
    if( dargs->name != NULL ) {
       route_metadata->name = strdup( dargs->name );
       if( route_metadata->name == NULL ) {
          return -ENOMEM;
       }
    }
-   
+
    route_metadata->parent = dargs->parent;
    route_metadata->new_parent = dargs->new_parent;
    route_metadata->garbage_collect = dargs->garbage_collect;
@@ -713,8 +753,8 @@ static int fskit_route_metadata_populate( struct fskit_route_metadata* route_met
 // NOTE: fent *cannot* be locked--its lock status will be set through the route consistency discipline
 int fskit_route_call( struct fskit_core* core, int route_type, char const* path, struct fskit_entry* fent, struct fskit_route_dispatch_args* dargs, int* cbrc ) {
 
-   int rc = 0;   
-   struct fskit_route_metadata route_metadata;   
+   int rc = 0;
+   struct fskit_route_metadata route_metadata;
    struct fskit_path_route* route = NULL;
 
    memset( &route_metadata, 0, sizeof(struct fskit_route_metadata) );
@@ -729,20 +769,20 @@ int fskit_route_call( struct fskit_core* core, int route_type, char const* path,
       fskit_core_route_unlock( core );
       return -EPERM;
    }
-   
-   // found. propagate arguments 
+
+   // found. propagate arguments
    rc = fskit_route_metadata_populate( &route_metadata, dargs );
    if( rc != 0 ) {
-      
+
       // failed for some reason
       fskit_core_route_unlock( core );
       fskit_route_metadata_free( &route_metadata );
       return -EPERM;
    }
-   
-   
+
+
    fskit_debug("Call route type %d (%d)\n", route->route_type, route_type );
-               
+
    // dispatch
    *cbrc = fskit_route_dispatch( core, &route_metadata, route, fent, dargs );
 
@@ -868,62 +908,62 @@ int fskit_route_call_sync( struct fskit_core* core, char const* path, struct fsk
 }
 
 
-// call the route to rename 
+// call the route to rename
 // return 0 if a route was called, or -EPERM if there are no routes.
-// set the route callback return code in *cbrc 
-// NOTE: fent *cannot* be locked--its lock status will be set through the route consistency discipline 
+// set the route callback return code in *cbrc
+// NOTE: fent *cannot* be locked--its lock status will be set through the route consistency discipline
 // if dargs->dest exists, it will be write-locked
 int fskit_route_call_rename( struct fskit_core* core, char const* path, struct fskit_entry* fent, struct fskit_route_dispatch_args* dargs, int* cbrc ) {
    return fskit_route_call( core, FSKIT_ROUTE_MATCH_RENAME, path, fent, dargs, cbrc );
 }
 
 
-// call the route to link 
-// return 0 if a route was called, or -EPERM if there are no routes 
-// set the route callback return code in *cbrc 
-// NOTE: fent *cannot* be locked--its lock status will be set through the route consistency discipline 
+// call the route to link
+// return 0 if a route was called, or -EPERM if there are no routes
+// set the route callback return code in *cbrc
+// NOTE: fent *cannot* be locked--its lock status will be set through the route consistency discipline
 int fskit_route_call_link( struct fskit_core* core, char const* path, struct fskit_entry* fent, struct fskit_route_dispatch_args* dargs, int* cbrc ) {
     return fskit_route_call( core, FSKIT_ROUTE_MATCH_LINK, path, fent, dargs, cbrc );
 }
 
 
 // call the route to getxattr
-// return 0 if a route was called, or -EPERM if there are no routes 
+// return 0 if a route was called, or -EPERM if there are no routes
 // set the route callback return code in *cbrc
-// NOTE: fent *cannot* be locked--its lock status will be set through the route consistency discipline 
+// NOTE: fent *cannot* be locked--its lock status will be set through the route consistency discipline
 int fskit_route_call_getxattr( struct fskit_core* core, char const* path, struct fskit_entry* fent, struct fskit_route_dispatch_args* dargs, int* cbrc ) {
     return fskit_route_call( core, FSKIT_ROUTE_MATCH_GETXATTR, path, fent, dargs, cbrc );
 }
 
 
 // call the route to listxattr
-// return 0 if a route was called, or -EPERM if there are no routes 
+// return 0 if a route was called, or -EPERM if there are no routes
 // set the route callback return code in *cbrc
-// NOTE: fent *cannot* be locked--its lock status will be set through the route consistency discipline 
+// NOTE: fent *cannot* be locked--its lock status will be set through the route consistency discipline
 int fskit_route_call_listxattr( struct fskit_core* core, char const* path, struct fskit_entry* fent, struct fskit_route_dispatch_args* dargs, int* cbrc ) {
     return fskit_route_call( core, FSKIT_ROUTE_MATCH_LISTXATTR, path, fent, dargs, cbrc );
 }
 
 
 // call the route to setxattr
-// return 0 if a route was called, or -EPERM if there are no routes 
+// return 0 if a route was called, or -EPERM if there are no routes
 // set the route callback return code in *cbrc
-// NOTE: fent *cannot* be locked--its lock status will be set through the route consistency discipline 
+// NOTE: fent *cannot* be locked--its lock status will be set through the route consistency discipline
 int fskit_route_call_setxattr( struct fskit_core* core, char const* path, struct fskit_entry* fent, struct fskit_route_dispatch_args* dargs, int* cbrc ) {
     return fskit_route_call( core, FSKIT_ROUTE_MATCH_SETXATTR, path, fent, dargs, cbrc );
 }
 
 
 // call the route to removexattr
-// return 0 if a route was called, or -EPERM if there are no routes 
+// return 0 if a route was called, or -EPERM if there are no routes
 // set the route callback return code in *cbrc
-// NOTE: fent *cannot* be locked--its lock status will be set through the route consistency discipline 
+// NOTE: fent *cannot* be locked--its lock status will be set through the route consistency discipline
 int fskit_route_call_removexattr( struct fskit_core* core, char const* path, struct fskit_entry* fent, struct fskit_route_dispatch_args* dargs, int* cbrc ) {
     return fskit_route_call( core, FSKIT_ROUTE_MATCH_REMOVEXATTR, path, fent, dargs, cbrc );
 }
 
 
-// call the route to setmetadata 
+// call the route to setmetadata
 // return 0 if the route was called, or -EPERM if there are no routes
 // set the route callback return code in *cbrc
 // NOTE: fent *cannot* be locked
@@ -938,7 +978,7 @@ static int fskit_path_route_init( struct fskit_path_route* route, char const* re
 
    int rc = 0;
    memset( route, 0, sizeof(struct fskit_path_route) );
-   
+
    rc = regcomp( &route->path_regex, regex_str, REG_EXTENDED | REG_NEWLINE );
    if( rc != 0 ) {
 
@@ -983,21 +1023,21 @@ int fskit_path_route_free( struct fskit_path_route* route ) {
 }
 
 
-// remove all routes from a given route table, freeing them and destroying them 
+// remove all routes from a given route table, freeing them and destroying them
 // return 0 on success
 // return -EINVAL if there are no routes defined for this type
 static int fskit_path_route_erase_all( fskit_route_table** route_table, int route_type ) {
-   
+
    struct fskit_route_table_row* row = fskit_route_table_get_row( *route_table, route_type );
    if( row == NULL ) {
       return -EINVAL;
    }
-   
-   // clear it out 
+
+   // clear it out
    sglib_fskit_route_table_delete( route_table, row );
    fskit_route_table_row_free( row );
    fskit_safe_free( row );
-   
+
    return 0;
 }
 
@@ -1015,7 +1055,7 @@ static int fskit_path_route_decl( struct fskit_core* core, char const* route_reg
 
    rc = fskit_path_route_init( route, route_regex, consistency_discipline, route_type, method );
    if( rc != 0 ) {
-   
+
       fskit_safe_free( route );
       return rc;
    }
@@ -1045,17 +1085,17 @@ static int fskit_path_route_undecl( struct fskit_core* core, int route_type, int
    route = fskit_route_table_remove( &core->routes, route_type, route_handle );
 
    fskit_core_route_unlock( core );
-   
+
    if( route == NULL ) {
       return -EINVAL;
    }
    else {
-      
-      // destroy 
+
+      // destroy
       fskit_path_route_free( route );
       fskit_safe_free( route );
    }
-   
+
    return rc;
 }
 
@@ -1320,60 +1360,60 @@ int fskit_unroute_sync( struct fskit_core* core, int route_handle ) {
 }
 
 
-// declare a route for renaming a file or directory 
+// declare a route for renaming a file or directory
 // Note that for renames, the consistency *must be* FSKIT_SEQUENTIAL, since both the source and dest inodes will be write-locked
 // return >= 0 on success (the route handle)
-// return -EINVAL if we couldn't compile the regex 
+// return -EINVAL if we couldn't compile the regex
 // return -EINVAL if consistency_discipline is not supported
-// return -ENOMEM if out of memory 
+// return -ENOMEM if out of memory
 int fskit_route_rename( struct fskit_core* core, char const* route_regex, fskit_entry_route_rename_callback_t rename_cb, int consistency_discipline ) {
-   
+
    union fskit_route_method method;
    method.rename_cb = rename_cb;
-   
+
    if( consistency_discipline != FSKIT_CONCURRENT && consistency_discipline != FSKIT_SEQUENTIAL ) {
       return -EINVAL;
    }
-   
+
    return fskit_path_route_decl( core, route_regex, FSKIT_ROUTE_MATCH_RENAME, method, consistency_discipline );
 }
 
 
-// undeclare a route for renaming a file or directory 
+// undeclare a route for renaming a file or directory
 // return 0 on success
 // return -EINVAL if the route can't possibly exist
 int fskit_unroute_rename( struct fskit_core* core, int route_handle ) {
-   
+
    return fskit_path_route_undecl( core, FSKIT_ROUTE_MATCH_RENAME, route_handle );
 }
 
 
-// declare a route for linking a file into a new directory 
+// declare a route for linking a file into a new directory
 // return >=0 on success (the route handle )
 // return -EINVAL if consistency_discipline is not supported
-// return -ENOMEM if out of memory 
+// return -ENOMEM if out of memory
 int fskit_route_link( struct fskit_core* core, char const* route_regex, fskit_entry_route_link_callback_t link_cb, int consistency_discipline ) {
-    
+
    union fskit_route_method method;
    method.link_cb = link_cb;
-   
+
    return fskit_path_route_decl( core, route_regex, FSKIT_ROUTE_MATCH_LINK, method, consistency_discipline );
 }
 
 
-// undeclare a route for linking a file into a directory 
-// return 0 on success 
-// return -EINVAL if the route can't possibly exist 
+// undeclare a route for linking a file into a directory
+// return 0 on success
+// return -EINVAL if the route can't possibly exist
 int fskit_unroute_link( struct fskit_core* core, int route_handle ) {
-    
+
    return fskit_path_route_undecl( core, FSKIT_ROUTE_MATCH_LINK, route_handle );
 }
 
 
-// declare a route for getting an xattr 
+// declare a route for getting an xattr
 // return >=0 on success (the route handle)
 // return -EINVAL if consistency discipline is not supported
-// return -ENOMEM if out of memory 
+// return -ENOMEM if out of memory
 int fskit_route_getxattr( struct fskit_core* core, char const* route_regex, fskit_entry_route_getxattr_callback_t getxattr_cb, int consistency_discipline ) {
 
    union fskit_route_method method;
@@ -1384,16 +1424,16 @@ int fskit_route_getxattr( struct fskit_core* core, char const* route_regex, fski
 
 // undeclare a route for getting an xattr
 // return 0 on success
-// return -EINVAL if the route can't possibly exist 
+// return -EINVAL if the route can't possibly exist
 int fskit_unroute_getxattr( struct fskit_core* core, int route_handle ) {
 
    return fskit_path_route_undecl( core, FSKIT_ROUTE_MATCH_GETXATTR, route_handle );
 }
 
-// declare a route for listing an xattr 
+// declare a route for listing an xattr
 // return >=0 on success (the route handle)
 // return -EINVAL if consistency discipline is not supported
-// return -ENOMEM if out of memory 
+// return -ENOMEM if out of memory
 int fskit_route_listxattr( struct fskit_core* core, char const* route_regex, fskit_entry_route_listxattr_callback_t listxattr_cb, int consistency_discipline ) {
 
    union fskit_route_method method;
@@ -1404,7 +1444,7 @@ int fskit_route_listxattr( struct fskit_core* core, char const* route_regex, fsk
 
 // undeclare a route for listing xattrs
 // return 0 on success
-// return -EINVAL if the route can't possibly exist 
+// return -EINVAL if the route can't possibly exist
 int fskit_unroute_listxattr( struct fskit_core* core, int route_handle ) {
 
    return fskit_path_route_undecl( core, FSKIT_ROUTE_MATCH_LISTXATTR, route_handle );
@@ -1414,7 +1454,7 @@ int fskit_unroute_listxattr( struct fskit_core* core, int route_handle ) {
 // declare a route for setting an xattr
 // return >=0 on success (the route handle)
 // return -EINVAL if consistency discipline is not supported
-// return -ENOMEM if out of memory 
+// return -ENOMEM if out of memory
 int fskit_route_setxattr( struct fskit_core* core, char const* route_regex, fskit_entry_route_setxattr_callback_t setxattr_cb, int consistency_discipline ) {
 
    union fskit_route_method method;
@@ -1425,17 +1465,17 @@ int fskit_route_setxattr( struct fskit_core* core, char const* route_regex, fski
 
 // undeclare a route for setting an xattr
 // return 0 on success
-// return -EINVAL if the route can't possibly exist 
+// return -EINVAL if the route can't possibly exist
 int fskit_unroute_setxattr( struct fskit_core* core, int route_handle ) {
 
    return fskit_path_route_undecl( core, FSKIT_ROUTE_MATCH_SETXATTR, route_handle );
 }
 
 
-// declare a route for removing an xattr 
+// declare a route for removing an xattr
 // return >=0 on success (the route handle)
 // return -EINVAL if consistency discipline is not supported
-// return -ENOMEM if out of memory 
+// return -ENOMEM if out of memory
 int fskit_route_removexattr( struct fskit_core* core, char const* route_regex, fskit_entry_route_removexattr_callback_t removexattr_cb, int consistency_discipline ) {
 
    union fskit_route_method method;
@@ -1446,18 +1486,18 @@ int fskit_route_removexattr( struct fskit_core* core, char const* route_regex, f
 
 // undeclare a route for listing xattrs
 // return 0 on success
-// return -EINVAL if the route can't possibly exist 
+// return -EINVAL if the route can't possibly exist
 int fskit_unroute_removexattr( struct fskit_core* core, int route_handle ) {
 
    return fskit_path_route_undecl( core, FSKIT_ROUTE_MATCH_REMOVEXATTR, route_handle );
 }
 
 
-// declare a route for setting inode metadata 
-// consistency_discipline *must* be FSKIT_ROUTE_INODE_SEQUENTIAL 
+// declare a route for setting inode metadata
+// consistency_discipline *must* be FSKIT_ROUTE_INODE_SEQUENTIAL
 // return >= 0 on success (the route handle)
 // return -EINVAL if consistency discipline is not supported
-// return -ENOMEM if out of memory 
+// return -ENOMEM if out of memory
 int fskit_route_setmetadata( struct fskit_core* core, char const* route_regex, fskit_entry_route_setmetadata_callback_t setmetadata_cb, int consistency_discipline ) {
 
    union fskit_route_method method;
@@ -1473,27 +1513,27 @@ int fskit_route_setmetadata( struct fskit_core* core, char const* route_regex, f
 
 // undeclare a route for setting inode metadata
 // return 0 on success
-// return -EINVAL if the route can't possibly exist 
+// return -EINVAL if the route can't possibly exist
 int fskit_unroute_setmetadata( struct fskit_core* core, int route_handle ) {
 
    return fskit_path_route_undecl( core, FSKIT_ROUTE_MATCH_SETMETADATA, route_handle );
 }
 
 
-// undeclare all routes 
+// undeclare all routes
 // return 0 on success
 int fskit_unroute_all( struct fskit_core* core ) {
-   
+
    int rc = 0;
-   
+
    // atomically update route table
    fskit_core_route_wlock( core );
 
    for( int i = 0; i < FSKIT_ROUTE_NUM_ROUTE_TYPES; i++ ) {
-      
+
       fskit_path_route_erase_all( &core->routes, i );
    }
-   
+
    fskit_core_route_unlock( core );
 
    return rc;
@@ -1503,7 +1543,7 @@ int fskit_unroute_all( struct fskit_core* core ) {
 int fskit_route_create_args( struct fskit_route_dispatch_args* dargs, struct fskit_entry* parent, char const* name, mode_t mode, void* cls ) {
 
    memset( dargs, 0, sizeof(struct fskit_route_dispatch_args) );
-   
+
    dargs->name = name;
    dargs->parent = parent;
    dargs->mode = mode;
@@ -1646,27 +1686,27 @@ int fskit_route_sync_args( struct fskit_route_dispatch_args* dargs ) {
 
 // set up dargs for rename()
 int fskit_route_rename_args( struct fskit_route_dispatch_args* dargs, struct fskit_entry* old_parent, char const* old_name, char const* new_path, struct fskit_entry* new_parent, struct fskit_entry* dest ) {
-   
+
    memset( dargs, 0, sizeof(struct fskit_route_dispatch_args) );
-   
+
    dargs->name = old_name,
    dargs->parent = old_parent;
    dargs->new_path = new_path;
    dargs->dest = dest;
    dargs->new_parent = new_parent;
-   
+
    return 0;
 }
 
 // set up dargs for link()
 int fskit_route_link_args( struct fskit_route_dispatch_args* dargs, char const* name, char const* new_path, struct fskit_entry* new_parent ) {
-   
+
    memset( dargs, 0, sizeof(struct fskit_route_dispatch_args) );
-   
+
    dargs->name = name;
    dargs->new_parent = new_parent;
    dargs->new_path = new_path;
-   
+
    return 0;
 }
 
@@ -1681,9 +1721,9 @@ int fskit_route_getxattr_args( struct fskit_route_dispatch_args* dargs, char con
    return 0;
 }
 
-// set up dargs for setxattr 
+// set up dargs for setxattr
 int fskit_route_setxattr_args( struct fskit_route_dispatch_args* dargs, char const* xattr_name, char const* xattr_value, size_t xattr_value_len, int flags ) {
-   
+
    memset( dargs, 0, sizeof(struct fskit_route_dispatch_args) );
 
    dargs->xattr_name = xattr_name;
@@ -1693,7 +1733,7 @@ int fskit_route_setxattr_args( struct fskit_route_dispatch_args* dargs, char con
    return 0;
 }
 
-// set up dargs for listxattr 
+// set up dargs for listxattr
 int fskit_route_listxattr_args( struct fskit_route_dispatch_args* dargs, char* xattr_buf, size_t xattr_buf_len ) {
 
    memset( dargs, 0, sizeof(struct fskit_route_dispatch_args));
@@ -1703,7 +1743,7 @@ int fskit_route_listxattr_args( struct fskit_route_dispatch_args* dargs, char* x
    return 0;
 }
 
-// set up dargs for removexattr 
+// set up dargs for removexattr
 int fskit_route_removexattr_args( struct fskit_route_dispatch_args* dargs, char const* xattr_name ) {
 
    memset( dargs, 0, sizeof(struct fskit_route_dispatch_args));
@@ -1711,7 +1751,7 @@ int fskit_route_removexattr_args( struct fskit_route_dispatch_args* dargs, char 
    return 0;
 }
 
-// set up dargs for setmetadata 
+// set up dargs for setmetadata
 // imd will NOT be duplicated, but referenced
 int fskit_route_setmetadata_args( struct fskit_route_dispatch_args* dargs, struct fskit_inode_metadata* imd ) {
 
@@ -1720,22 +1760,22 @@ int fskit_route_setmetadata_args( struct fskit_route_dispatch_args* dargs, struc
    return 0;
 }
 
-// get the route metadata path 
+// get the route metadata path
 char* fskit_route_metadata_get_path( struct fskit_route_metadata* route_metadata ) {
    return route_metadata->path;
 }
 
-// get the route metadata name 
+// get the route metadata name
 char* fskit_route_metadata_get_name( struct fskit_route_metadata* route_metadata ) {
    return route_metadata->name;
 }
 
-// get caller-given closure 
+// get caller-given closure
 void* fskit_route_metadata_get_cls( struct fskit_route_metadata* route_metadata ) {
    return route_metadata->cls;
 }
 
-// get the number of match groups 
+// get the number of match groups
 int fskit_route_metadata_num_match_groups( struct fskit_route_metadata* route_metadata ) {
    return route_metadata->argc;
 }
@@ -1765,18 +1805,18 @@ bool fskit_route_metadata_is_garbage_collected( struct fskit_route_metadata* rou
    return route_metadata->garbage_collect;
 }
 
-// get the xattr name 
+// get the xattr name
 char const* fskit_route_metadata_get_xattr_name( struct fskit_route_metadata* route_metadata ) {
    return route_metadata->xattr_name;
 }
 
-// get the xattr value and len 
+// get the xattr value and len
 char const* fskit_route_metadata_get_xattr_value( struct fskit_route_metadata* route_metadata, size_t* len ) {
    *len = route_metadata->xattr_value_len;
    return route_metadata->xattr_value;
 }
 
-// get the xattr value buffer and len 
+// get the xattr value buffer and len
 char* fskit_route_metadata_get_xattr_buf( struct fskit_route_metadata* route_metadata, size_t* len ) {
    *len = route_metadata->xattr_buf_len;
    return route_metadata->xattr_buf;

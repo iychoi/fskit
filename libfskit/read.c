@@ -61,17 +61,6 @@ ssize_t fskit_read( struct fskit_core* core, struct fskit_file_handle* fh, char*
    }
 
    ssize_t num_read = fskit_run_user_read( core, fh->path, fh->fent, buf, buflen, offset, fh->app_data );
-
-   if( num_read >= 0 ) {
-
-      // update metadata
-      fskit_entry_wlock( fh->fent );
-
-      fskit_entry_set_atime( fh->fent, NULL );
-
-      fskit_entry_unlock( fh->fent );
-   }
-
    fskit_file_handle_unlock( fh );
 
    return num_read;
